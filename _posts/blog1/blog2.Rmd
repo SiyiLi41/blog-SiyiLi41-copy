@@ -1,0 +1,204 @@
+---
+title: "9"
+description: |
+  A short description of the post.
+author:
+  - name: Nora Jones
+    url: https://example.com/norajones
+date: 08-31-2021
+output:
+  distill::distill_article:
+    self_contained: false
+---
+
+
+```{r, echo =FALSE}
+library(here)
+library(coronavirus)
+library(dplyr)
+library(base)
+library(tidyr)
+library(kableExtra)
+library(ggplot2)
+library(DT)
+library(zoo)
+library(sparkline)
+library(htmlwidgets)
+```
+
+
+```{r, echo =FALSE, message = FALSE, warning = FALSE}
+load(file = here::here("Data/coronavirus.rda"))
+
+coronavirus$country <- as.character(gsub(",","",coronavirus$country))
+
+coronavirus%>%
+  dplyr::filter(country=="Korea South")%>%
+  dplyr::group_by(date, type) %>%
+  dplyr::summarise(total = sum(cases, na.rm = TRUE),
+                   .groups = "drop") %>%
+  tidyr::pivot_wider(names_from = type,
+                     values_from = total) %>%
+  dplyr::arrange(date) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(active =  confirmed - death - recovered) %>%
+  dplyr::mutate(confirmed_cum = cumsum(confirmed),
+                death_cum = cumsum(death),
+                recovered_cum = cumsum(recovered),
+                active_cum = cumsum(active))%>%
+  dplyr::mutate(year = as.character(lubridate::year(date)), 
+                month = as.character(lubridate::month(date)))%>%
+  select(-date)->NEW
+
+NEW%>%
+  mutate(date=paste(NEW$year, NEW$month, sep = "-"))->NEW
+
+NEW%>%
+  select(date, c(confirmed_cum:month))%>%
+  group_by(date)%>%
+  summarise(total_confirmed=max(confirmed_cum),
+            total_death=max(death_cum),
+            total_recovered=max(recovered_cum),
+            total_active=max(active_cum)) %>%
+  ungroup()->mydata
+
+
+  mydata
+```
+
+```{r, echo =FALSE,message = FALSE, warning = FALSE}
+vac<-read.csv(here::here("Data/owid-covid-data.csv"))
+```
+
+```{r,echo=FALSE,message = FALSE, warning = FALSE}
+vac1<-vac%>%
+  filter(location=="South Korea")%>%
+  select(date, total_vaccinations, people_vaccinated,total_cases,new_cases,people_fully_vaccinated, population)%>%
+  mutate(date=as.Date(date))%>%
+  filter(date>"2020-02-10")%>%
+  dplyr::mutate(year = as.character(lubridate::year(date)), 
+                month = as.character(lubridate::month(date)))%>%
+  select(-date)
+
+vac1%>%
+  mutate(date=paste(vac1$year, vac1$month, sep = "-"))%>%
+  select(-month,-year)->vac1
+
+```
+
+```{r, echo =FALSE,message = FALSE, warning = FALSE}
+new_vacc<-vac1%>%
+  group_by(date, population)%>%
+  summarise(newCase=max(total_cases),
+            newVacc=max(total_vaccinations),
+            fullVacc=max(people_fully_vaccinated))%>%
+  ungroup()%>%
+  select(date, newVacc, fullVacc, population)%>%
+  na.omit()
+
+# new_vacc[is.na(new_vacc)]<-0
+
+final_vacc<-new_vacc%>%
+  mutate(fvacc_rate=round((fullVacc/population)*100, digits=2),
+         vacc_rate=round((newVacc/population)*100, digits=2))
+```
+
+```{r,echo =FALSE,message = FALSE, warning = FALSE}
+total_rate<-mydata%>%
+  mutate(death_rate=round((total_death/total_confirmed)*100,digits = 2),
+        recovered_rate=round((total_recovered/total_confirmed)*100, digits=2))
+total_rate
+```
+
+```{r,echo =FALSE,message = FALSE, warning = FALSE}
+total_rate%>%
+ left_join(final_vacc, by = "date")->final_data
+
+final_data[is.na(final_data)]<-0
+final_data$population[final_data$population==0]<-51305184
+
+final_data%>%
+  select(-c(newVacc:vacc_rate))->final_data
+  # mutate(Date=as.yearmon(final_data$date, "%B%Y"))->final_data
+```
+
+```{r,echo =FALSE,message = FALSE, warning = FALSE}
+options(DT.options = list(pageLength = 6))
+vac1%>%select(date,people_vaccinated,people_fully_vaccinated)%>%
+  group_by(date)%>%
+  summarize(vacc_trend= spk_chr(people_vaccinated, type ="line"),
+            fullVacc_trend=spk_chr(people_vaccinated, type ="bar"))->vaccc
+
+final_vacc%>%
+  # select(year,month,fvacc_rate,vacc_rate)%>%
+  left_join(vaccc, by = "date")->p2
+
+datatable(p2, escape = FALSE,
+          options = list(paging = FALSE,
+                         dom = 'ft',
+                         initComplete = JS(
+    "function(settings, json) {",
+    "$(this.api().table().header()).css({'background-color': 'black', 'color': 'white'});",
+    "}"),
+                         fnDrawCallback = htmlwidgets::JS(
+    'function(){
+  HTMLWidgets.staticRender();
+}
+')
+))%>%
+  formatStyle('vacc_rate',
+              background = styleColorBar(p2$vacc_rate, 'lightblue'),
+              backgroundSize = '100% 90%',
+              backgroundRepeat = 'no-repeat',
+              backgroundPosition = 'center')%>%
+   formatStyle('fvacc_rate',
+              background = styleColorBar(p2$fvacc_rate, 'gray'),
+              backgroundSize = '100% 90%',
+              backgroundRepeat = 'no-repeat',
+              backgroundPosition = 'center')%>%
+  spk_add_deps()
+```
+
+```{r,echo =FALSE,message = FALSE, warning = FALSE}
+options(DT.options = list(pageLength = 6))
+datatable(final_data) %>%  
+  formatStyle('recovered_rate',
+              background = styleColorBar(final_data$recovered_rate, 'lightblue'),
+              backgroundSize = '100% 90%',
+              backgroundRepeat = 'no-repeat',
+              backgroundPosition = 'center') %>% 
+  formatStyle('death_rate',
+              background = styleColorBar(final_data$death_rate, 'pink'),
+              backgroundSize = '100% 90%',
+              backgroundRepeat = 'no-repeat',
+              backgroundPosition = 'center')
+```
+
+```{r,echo =FALSE,message = FALSE, warning = FALSE}
+ NEW%>%select(date, active_cum)%>%
+  group_by(date)%>%
+  summarize(active_trend = spk_chr(active_cum, type ="line"))->new
+
+#     formattable() %>%
+#     formattable::as.htmlwidget() %>%
+#     spk_add_deps()->new
+
+mydata%>%
+  left_join(new, by = "date")->p1
+
+options(DT.options = list(pageLength = 8))
+datatable(p1, escape = FALSE,
+          options = list(paging = TRUE,
+                         dom = 'ft',
+                         initComplete = JS(
+    "function(settings, json) {",
+    "$(this.api().table().header()).css({'background-color': 'black', 'color': 'white'});",
+    "}"),
+                         fnDrawCallback = htmlwidgets::JS(
+    'function(){
+  HTMLWidgets.staticRender();
+}
+')
+)) %>%
+  spk_add_deps()
+```

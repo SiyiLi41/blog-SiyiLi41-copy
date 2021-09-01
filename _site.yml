@@ -1,0 +1,14 @@
+navbar:
+  title: "The Covid19 in South Korea"
+  right:
+    - text: "Home"
+      href: index.html
+    - text: "blog2"
+      href: blog2.html
+output_dir: "_site"
+output: 
+  distill::distill_article:
+    css: style.css
+    
+  
+  
